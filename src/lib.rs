@@ -21,6 +21,7 @@ extern crate alloc;
 mod alloc_bits;
 mod bytes;
 mod cache;
+mod check;
 mod crc32c;
 mod dir;
 mod extent;
@@ -30,6 +31,7 @@ mod journal;
 mod layout;
 mod mkfs;
 
+pub use check::CheckReport;
 pub use fs::{DirEntry, Ext4, Ino, Kind, Metadata, MountOptions, Stats};
 pub use mkfs::{FormatOptions, format};
 

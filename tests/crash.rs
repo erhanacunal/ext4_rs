@@ -109,6 +109,9 @@ fn power_loss_anywhere() {
         let now = snapshot(&mut fs);
         let ok = now == states[k] || (k < STEPS && now == states[k + 1]);
         assert!(ok, "cut {}: state matches neither step {} nor {}", n, k, k + 1);
+        assert!(fs.mount_state().0 || n == 0, "cut {}: mount saw a clean file system", n);
+        let report = fs.check().unwrap();
+        assert!(report.problems.is_empty(), "cut {}: {:?}", n, report.problems);
         let after = fs.unmount().unwrap();
         if have_e2fsprogs() && (n % 7 == 0 || ends.contains(&n) || n == log.len()) {
             fsck_clean(&after, "crash-ours");
@@ -136,6 +139,8 @@ fn power_loss_anywhere() {
                 let mut fs = Ext4::mount(crashed, MountOptions::default()).unwrap_or_else(|e| panic!("write {} alone: {:?}", i, e));
                 let now = snapshot(&mut fs);
                 assert!(now == states[k] || (k < STEPS && now == states[k + 1]), "write {} alone", i);
+                let report = fs.check().unwrap();
+                assert!(report.problems.is_empty(), "write {} alone: {:?}", i, report.problems);
                 let after = fs.unmount().unwrap();
                 if have_e2fsprogs() && reordered % 5 == 0 {
                     fsck_clean(&after, "crash-reordered");

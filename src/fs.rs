@@ -86,6 +86,9 @@ pub struct Ext4<D: BlockDevice> {
     pub(crate) committed_at: u64,
     pub(crate) commit_blocks: usize,
     pub(crate) generation: u32,
+    /// Whether mount found the file system not cleanly unmounted, and replayed a transaction.
+    pub(crate) unclean: bool,
+    pub(crate) replayed: bool,
 }
 
 /// Checks one path component.
@@ -113,8 +116,10 @@ impl<D: BlockDevice> Ext4<D> {
 
         // The journal, before anything else is read: a replay may rewrite any block.
         let journal_inode = read_inode_raw(&mut dev, &mut cache, &geo, seed, JOURNAL_INO)?;
+        let unclean = sb.u32(sb::FEATURE_INCOMPAT) & INCOMPAT_RECOVER != 0;
         let mut journal = Journal::open(&mut dev, &journal_inode, &sb.uuid())?;
-        if journal.replay(&mut dev)? {
+        let replayed = journal.replay(&mut dev)?;
+        if replayed {
             cache.clear();
             dev.read(0, &mut block0)?;
             sb = Superblock { raw: block0[SB_OFFSET..SB_OFFSET + SB_SIZE].try_into().unwrap() };
@@ -157,6 +162,8 @@ impl<D: BlockDevice> Ext4<D> {
             failed: false,
             committed_at: 0,
             commit_blocks,
+            unclean,
+            replayed,
         };
         fs.init_uninit_groups();
         // Mark it in use (as Linux does): needs_recovery until a clean unmount.
@@ -223,6 +230,11 @@ impl<D: BlockDevice> Ext4<D> {
         self.dev.flush()?;
         self.cache.invalidate(0);
         Ok(())
+    }
+
+    /// What mount found: (not cleanly unmounted, a committed transaction replayed).
+    pub fn mount_state(&self) -> (bool, bool) {
+        (self.unclean, self.replayed)
     }
 
     pub fn stats(&self) -> Stats {

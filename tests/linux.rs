@@ -28,6 +28,8 @@ fn reads_what_linux_wrote() {
     let disk = MemDisk::load(&path);
     let expect_a = std::fs::read(path.with_extension("img.a")).unwrap();
     let mut fs = Ext4::mount(disk, MountOptions::default()).unwrap();
+    let r = fs.check().unwrap();
+    assert!(r.problems.is_empty(), "{:?}", r.problems);
     let a = fs.lookup("/dir/a.bin").unwrap().unwrap();
     let mut buf = vec![0u8; expect_a.len()];
     assert_eq!(fs.read_at(a, 0, &mut buf).unwrap(), expect_a.len());
@@ -52,6 +54,8 @@ fn linux_writes_into_ours() {
     let mut d = MemDisk::new(200);
     format(&mut d, &FormatOptions { uuid: [9; 16], inodes_per_group: 512, journal_blocks: 1024, ..Default::default() }).unwrap();
     let mut fs = Ext4::mount(d, MountOptions::default()).unwrap();
+    let r = fs.check().unwrap();
+    assert!(r.problems.is_empty(), "{:?}", r.problems);
     fs.mkdir("/ours").unwrap();
     let f = fs.create("/ours/f").unwrap();
     fs.write_at(f, 0, &pattern(1, 50_000)).unwrap();
@@ -68,6 +72,8 @@ fn linux_writes_into_ours() {
     assert_eq!(code, 0, "{}", text);
     let expect = std::fs::read(path.with_extension("img.c")).unwrap();
     let mut fs = Ext4::mount(MemDisk::load(&path), MountOptions::default()).unwrap();
+    let r = fs.check().unwrap();
+    assert!(r.problems.is_empty(), "{:?}", r.problems);
     assert_eq!(fs.lookup("/ours/f").unwrap(), None);
     let ino = fs.lookup("/ours/linux.bin").unwrap().unwrap();
     let mut buf = vec![0u8; expect.len()];

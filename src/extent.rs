@@ -204,6 +204,38 @@ impl<D: BlockDevice> Ext4<D> {
         Ok(Mapping::Hole(bound - lblk))
     }
 
+    /// Calls `f(start, len, data)` for every block run the inode's tree uses: its node blocks
+    /// (`data` false, one each) and its extents. Returns the logical block after the last
+    /// extent (0 for none).
+    pub(crate) fn extent_walk(&mut self, ino: Ino, inode: &Inode, f: &mut dyn FnMut(u64, u32, bool) -> Result<()>) -> Result<u32> {
+        let seed = Inode::seed(self.seed, ino, inode.generation());
+        let root = self.load_node(inode, seed, Loc::Root)?;
+        self.walk_rec(inode, seed, root, f)
+    }
+
+    fn walk_rec(&mut self, inode: &Inode, seed: u32, node: Node, f: &mut dyn FnMut(u64, u32, bool) -> Result<()>) -> Result<u32> {
+        let mut end = 0u32;
+        if node.depth == 0 {
+            for e in &node.entries {
+                f(e.ptr, e.len, true)?;
+                end = end.max(e.lblk.checked_add(e.len).ok_or(Error::Corrupt("extent past 2^32"))?);
+            }
+            return Ok(end);
+        }
+        for e in &node.entries {
+            f(e.ptr, 1, false)?;
+            let child = self.load_node(inode, seed, Loc::Block(e.ptr))?;
+            if child.depth != node.depth - 1 {
+                return Err(Error::Corrupt("extent tree depth"));
+            }
+            if child.entries.first().is_some_and(|c| c.lblk < e.lblk) {
+                return Err(Error::Corrupt("extent index key"));
+            }
+            end = end.max(self.walk_rec(inode, seed, child, f)?);
+        }
+        Ok(end)
+    }
+
     /// Maps logical blocks `lblk..lblk + len` (unmapped now) to physical `pblk..`. Tree blocks
     /// it allocates are added to the inode's block count; the caller writes the inode.
     pub(crate) fn extent_insert(&mut self, ino: Ino, inode: &mut Inode, lblk: u32, pblk: u64, len: u32) -> Result<()> {

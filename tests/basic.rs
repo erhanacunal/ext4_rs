@@ -120,6 +120,8 @@ fn directories_grow_and_shrink() {
     .unwrap();
     assert_eq!(count, 300 - 2);
     fs.sync().unwrap();
+    let r = fs.check().unwrap();
+    assert!(r.problems.is_empty(), "{:?}", r.problems);
     let d = fs.unmount().unwrap();
     fsck_clean(&d, "dirs");
 }
@@ -161,6 +163,8 @@ fn fragmented_files_and_truncate() {
     check(&mut fs, b, n, 100_000);
     fs.set_len(b, 0).unwrap();
     fs.remove("/a").unwrap();
+    let r = fs.check().unwrap();
+    assert!(r.problems.is_empty(), "{:?}", r.problems);
     let d = fs.unmount().unwrap();
     fsck_clean(&d, "frag-truncated");
 }
@@ -203,4 +207,35 @@ fn rejects_bad_names() {
     fs.create(&ok).unwrap();
     let d = fs.unmount().unwrap();
     fsck_clean(&d, "names");
+}
+
+#[test]
+fn check_finds_damage() {
+    let mut fs = mount(fresh(140, 7));
+    fs.mkdir("/d").unwrap();
+    for i in 0..30 {
+        let ino = fs.create(&format!("/d/f{}", i)).unwrap();
+        fs.write_at(ino, 0, &pattern(i, 20_000 + i as usize * 5000)).unwrap();
+    }
+    fs.remove("/d/f3").unwrap();
+    let r = fs.check().unwrap();
+    assert!(r.problems.is_empty(), "{:?}", r.problems);
+    assert_eq!((r.dirs, r.files), (3, 29));
+    let mut d = fs.unmount().unwrap();
+    // A block marked free behind the file system's back: block bitmap of group 0 is block 1 +
+    // the descriptor table (one block) = 2; clear a bit in the data area.
+    let mut map = vec![0u8; BLOCK_SIZE];
+    d.read(2, &mut map).unwrap();
+    let byte = (0..map.len()).rev().find(|&i| map[i] == 0xFF && i < 4000).unwrap();
+    map[byte] &= !1;
+    d.write(2, &map).unwrap();
+    // The bitmap checksum is now wrong too: check what mount says, then let check report.
+    match Ext4::mount(d, MountOptions::default()) {
+        Ok(mut fs) => {
+            let r = fs.check().unwrap();
+            assert!(!r.problems.is_empty());
+            println!("{:?}", r.problems);
+        }
+        Err(e) => println!("mount refused: {:?}", e),
+    }
 }
