@@ -1,175 +1,55 @@
+# ext4_rs (ferrite fork)
 
+A small `no_std` ext4 with a jbd2 journal, for the ferrite-ui-xl firmware (Exynos 4412
+tablet, eMMC USERDATA partition). No dependencies; needs `alloc`.
 
-# An os independent rust ext4 file system
+Forked from [yuoo655/ext4_rs](https://github.com/yuoo655/ext4_rs); the code here is a rewrite
+(the fork's history keeps the original).
 
-[![Crates.io Version](https://img.shields.io/crates/v/ext4_rs)](https://crates.io/crates/ext4_rs)
-[![Crates.io License](https://img.shields.io/crates/l/ext4_rs)](LICENSE)
-[![docs.rs](https://img.shields.io/docsrs/ext4_rs)](https://docs.rs/ext4_rs)
+## What it does
 
-## env
-wsl2 ubuntu22.04
+- `format` makes one shape of file system: 4 KiB blocks, 32768 blocks a group, 256-byte
+  inodes, extents, `metadata_csum`, `sparse_super`, `large_file`, `dir_nlink`,
+  `extra_isize`, linear directories (no htree), no `flex_bg`/`64bit`, an internal journal
+  (inode 8, jbd2 checksum v3). Every inode table is zeroed.
+- `Ext4::mount` accepts only that shape (also when Linux's mke2fs made it with those
+  features, or e2fsck left groups uninitialized), replays a committed transaction, and marks
+  the file system in use (`needs_recovery`) until `unmount`.
+- Files and directories: `lookup`, `metadata`, `read_dir`, `create`, `mkdir`, `remove`,
+  `rename` (replaces a file atomically), `read_at`, `write_at`, `set_len`, `sync`, `stats`.
+  Paths are `/`-separated (any name of 1–255 bytes without `/` or NUL).
 
-rust version nightly-2024-06-01
+## Crash safety
 
-rustc 1.80.0-nightly (ada5e2c7b 2024-05-31)
+Metadata goes through the journal; file data does not (Linux's `data=ordered`): data reaches
+the device before the transaction that makes it part of a file. `sync` writes the
+transaction to the log, commits it, writes it home and empties the log; a transaction also
+commits by itself once it holds `MountOptions::commit_blocks` blocks. After a power loss the
+file system is as of the last commit (mount replays it). A failed device write makes it
+read-only until mounted again.
 
-mkfs.ext4 1.46.5 (30-Dec-2021) 
+Replace a file safely by writing a new one and `rename`-ing it over the old.
 
-For small images, the newer mkfs.ext4 uses a 512-byte block size. Use **mkfs.ext4 -b 4096** to set a 4096-byte block size.
-
-## run example
-> Note: The example script requires `sudo` privileges to mount the ext4 disk image.
-```sh
-git clone https://github.com/yuoo655/ext4_rs.git
-sh run.sh
-```
-## fuse example
-```
-git clone https://github.com/yuoo655/ext4libtest.git
-cd ext4libtest
-sh gen_img.sh
-# cargo run /path/to/mountpoint
-cargo run ./foo/
-```
-# features
-
-| 操作         |支持情况| 
-|--------------|------|
-| mount        | ✅   |
-| open         | ✅   |
-| close        | ✅   |
-| lsdir        | ✅   |
-| mkdir        | ✅   |
-| read_file    | ✅   |
-| read_link    | ✅   |
-| create_file  | ✅   |
-| write_file   | ✅   |
-| link         | ✅   |
-| unlink       | ✅   |
-| file_truncate| ✅   |
-| file_remove  | ✅   |
-| umount       | ✅   |
-| dir_remove   | ✅   |
-
-
-
-# how to use 
-
-## impl BlockDevice Trait
+## Device
 
 ```rust
-#[derive(Debug)]
-pub struct Disk {}
-
-impl BlockDevice for Disk {
-    fn read_offset(&self, offset: usize) -> Vec<u8> {
-        use std::fs::OpenOptions;
-        use std::io::{Read, Seek};
-        let mut file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open("ex4.img")
-            .unwrap();
-        let mut buf = vec![0u8; BLOCK_SIZE as usize];
-        let _r = file.seek(std::io::SeekFrom::Start(offset as u64));
-        let _r = file.read_exact(&mut buf);
-
-        buf
-    }
-
-    fn write_offset(&self, offset: usize, data: &[u8]) {
-        use std::fs::OpenOptions;
-        use std::io::{Seek, Write};
-        let mut file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open("ex4.img")
-            .unwrap();
-
-        let _r = file.seek(std::io::SeekFrom::Start(offset as u64));
-        let _r = file.write_all(&data);
-    }
-}
-
-```
-
-## open ext4
-
-```rust
-let disk = Arc::new(Disk {});
-let ext4 = Ext4::open(disk);
-```
-
-### read regular file
-```rust
-let path = "test_files/0.txt";
-let mut read_buf = vec![0u8;  READ_SIZE as usize];
-let child_inode = ext4.generic_open(path, &mut 2, false, 0, &mut 0).unwrap();
-// 1G
-let mut data = vec![0u8; 0x100000 * 1024 as usize];
-let read_data = ext4.read_at(child_inode, 0 as usize, &mut data);
-log::info!("read data  {:?}", &data[..10]);
-```
-
-### read link
-```rust
-let path = "test_files/linktest";
-let mut read_buf = vec![0u8;  READ_SIZE as usize];
-// 2 is root inode
-let child_inode = ext4.generic_open(path, &mut 2, false, 0, &mut 0).unwrap();
-let mut data = vec![0u8; 0x100000 * 1024 as usize];
-let read_data = ext4.read_at(child_inode, 0 as usize, &mut data);
-log::info!("read data  {:?}", &data[..10]);
-```
-
-### mkdir
-```rust    
-for i in 0..10 {
-    let path = format!("dirtest{}", i);
-    let path = path.as_str();
-    let r = ext4.dir_mk(&path);
-    assert!(r.is_ok(), "dir make error {:?}", r.err());
-}
-let path = "dir1/dir2/dir3/dir4/dir5/dir6";
-let r = ext4.dir_mk(&path);
-assert!(r.is_ok(), "dir make error {:?}", r.err());
-```
-
-### file write test
-```rust
-// file create/write
-let inode_mode = InodeFileType::S_IFREG.bits();
-let inode_ref = ext4.create(ROOT_INODE, "512M.txt", inode_mode).unwrap();
-
-const WRITE_SIZE: usize = (0x100000 * 512);
-let write_buf = vec![0x41 as u8; WRITE_SIZE];
-let r = ext4.write_at(inode_ref.inode_num, 0, &write_buf);
-```
-
-
-### ls
-```rust
-let entries = ext4.dir_get_entries(ROOT_INODE);
-log::info!("dir ls root");
-for entry in entries {
-    log::info!("{:?}", entry.get_name());
+impl BlockDevice for MyPartition {
+    fn read(&mut self, block: u64, buf: &mut [u8]) -> Result<(), IoError> { … }   // whole 4 KiB blocks
+    fn write(&mut self, block: u64, data: &[u8]) -> Result<(), IoError> { … }
+    fn flush(&mut self) -> Result<(), IoError> { … }   // earlier writes are stored
+    fn blocks(&self) -> u64 { … }
+    fn now(&self) -> u32 { … }                          // seconds since 1970, or 0
 }
 ```
 
-### file remove
-```rust
-let path = "test_files/file_to_remove";
-let r = ext4.file_remove(&path);
-```
+## Tests
 
-### dir remove
-```rust
-let path = "dir_to_remove";
-let r = ext4.dir_remove(ROOT_INODE, &path);
-```
+`cargo test --release`. The integration tests check every image with e2fsprogs in WSL
+(`wsl -d Debian`: `e2fsck -fn`, `debugfs`, `mke2fs`): files and directories, deep extent
+trees, a full device, a power loss after every device write (and with writes reordered
+between flushes, replayed by this crate and by `e2fsck -fy`), failed writes, and interchange
+with images and files Linux's tools wrote. Set `EXT4_NO_E2FSPROGS=1` to skip the e2fsprogs
+parts.
 
-
-# known bugs
-1. ~~ext4_valid_extent check fails in linux due to block allocation using system reserved blocks.~~ (Fixed: Block allocator now checks for system reserved blocks before allocation)
-
-2. ~~extent block checksum not set~~ (Fixed: Added support for computing and setting extent block checksums)
+The on-disk format follows the kernel's `Documentation/filesystems/ext4`; no kernel code is
+used.

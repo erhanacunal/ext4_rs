@@ -1,7 +1,7 @@
 [package]
 name = "ext4_rs"
-version = "1.3.3"
-edition = "2021"
+version = "2.0.0"
+edition = "2024"
 description = "no_std ext4 for ferrite-ui-xl (fork of yuoo655/ext4_rs)."
 authors = ["yuoo655 <lenuulan@gmail.com>"]
 license = "MIT"
