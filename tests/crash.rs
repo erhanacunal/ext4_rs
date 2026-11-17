@@ -191,3 +191,24 @@ fn failed_write_makes_it_read_only() {
     assert_eq!(outcomes[0], (0, false, false));
     assert!(outcomes.last().unwrap().1 && outcomes.last().unwrap().2);
 }
+
+#[test]
+fn commit_to_log_only_replays() {
+    let mut base = MemDisk::new(150);
+    format(&mut base, &FormatOptions { uuid: [9; 16], inodes_per_group: 512, journal_blocks: 1024, ..Default::default() }).unwrap();
+    let mut fs = Ext4::mount(base, MountOptions::default()).unwrap();
+    let ino = fs.create("/cut").unwrap();
+    fs.write_at(ino, 0, &pattern(5, 50_000)).unwrap();
+    fs.commit_to_log_only().unwrap();
+    assert_eq!(fs.create("/x"), Err(Error::ReadOnly));
+    let disk = fs.device().clone();
+    let mut fs = Ext4::mount(disk, MountOptions::default()).unwrap();
+    assert_eq!(fs.mount_state(), (true, true));
+    let ino = fs.lookup("/cut").unwrap().unwrap();
+    let mut back = vec![0u8; 50_000];
+    assert_eq!(fs.read_at(ino, 0, &mut back).unwrap(), 50_000);
+    assert!(back == pattern(5, 50_000));
+    assert!(fs.check().unwrap().problems.is_empty());
+    let d = fs.unmount().unwrap();
+    fsck_clean(&d, "log-only");
+}

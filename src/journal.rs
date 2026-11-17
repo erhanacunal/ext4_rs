@@ -362,6 +362,25 @@ impl<D: BlockDevice> Ext4<D> {
         result
     }
 
+    /// For power-loss tests: commits the running transaction to the log only, as a power cut
+    /// right after the commit block would leave it, and makes the file system read-only. The
+    /// next mount must replay it.
+    pub fn commit_to_log_only(&mut self) -> Result<()> {
+        self.writable()?;
+        let result = (|| {
+            self.stage_counters()?;
+            let now = self.now();
+            let blocks: Vec<(u64, &[u8])> = self.cache.dirty_blocks().collect();
+            if blocks.is_empty() {
+                return Ok(());
+            }
+            self.journal.log(&mut self.dev, &blocks, now)
+        })();
+        self.failed = true;
+        self.cache.discard_dirty();
+        result
+    }
+
     fn commit_inner(&mut self) -> Result<()> {
         self.stage_counters()?;
         if self.cache.dirty_count() == 0 {
