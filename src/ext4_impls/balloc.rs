@@ -177,7 +177,6 @@ impl Ext4 {
                 count -= 1;
 
                 if count == 0 {
-                    log::trace!("No free blocks available in all block groups");
                     return_errno_with_message!(
                         Errno::ENOSPC,
                         "No free blocks available in all block groups"
@@ -303,7 +302,6 @@ impl Ext4 {
                 count -= 1;
 
                 if count == 0 {
-                    log::trace!("No free blocks available in all block groups");
                     return_errno_with_message!(
                         Errno::ENOSPC,
                         "No free blocks available in all block groups"
@@ -541,26 +539,16 @@ impl Ext4 {
             return Ok(Vec::new());
         }
 
-        log::debug!(
-            "[Block Alloc] Requesting {} blocks starting from bgid {}",
-            count,
-            *start_bgid
-        );
 
         let super_block = &self.super_block;
         let block_group_count = super_block.block_group_count();
 
         // Validate inputs
         if block_group_count == 0 {
-            log::error!("[Block Alloc] Invalid block group count: 0");
             return return_errno_with_message!(Errno::EINVAL, "Invalid block group count");
         }
 
         if *start_bgid >= block_group_count {
-            log::warn!(
-                "[Block Alloc] Invalid start_bgid {}, resetting to 0",
-                *start_bgid
-            );
             *start_bgid = 0;
         }
 
@@ -579,7 +567,6 @@ impl Ext4 {
             // Check if this group has free blocks
             let free_blocks = block_group.get_free_blocks_count();
             if free_blocks == 0 {
-                log::debug!("[Block Alloc] Block group {} has no free blocks", bgid);
                 bgid = (bgid + 1) % block_group_count;
                 groups_checked += 1;
                 continue;
@@ -614,10 +601,6 @@ impl Ext4 {
                     // Check if this is a system reserved block
                     let block_num = self.bg_idx_to_addr(current_idx, bgid);
                     if self.is_system_reserved_block(block_num, bgid) {
-                        log::error!(
-                            "[Block Alloc] System reserved block found at {:x?}",
-                            block_num
-                        );
                         current_idx += 1;
                         continue;
                     }
@@ -636,12 +619,6 @@ impl Ext4 {
                     if result.len() > 1 {
                         let prev_block = result[result.len() - 2];
                         if block_num != prev_block + 1 {
-                            log::debug!(
-                                "[Block Alloc] Non-contiguous blocks: prev={}, current={}, diff={}",
-                                prev_block,
-                                block_num,
-                                block_num - prev_block
-                            );
                         }
                     }
                 }
@@ -666,11 +643,6 @@ impl Ext4 {
                     let block_num = self.bg_idx_to_addr(rel_blk_idx, bgid);
                     if self.is_system_reserved_block(block_num, bgid) {
                         // Skip this block and continue search
-                        log::error!(
-                            "[Block Alloc] System reserved block found at {:x?} bgid {}",
-                            block_num,
-                            bgid
-                        );
                         start_idx = rel_blk_idx + 1;
                         continue;
                     }
@@ -688,12 +660,6 @@ impl Ext4 {
                     if result.len() > 1 {
                         let prev_block = result[result.len() - 2];
                         if block_num != prev_block + 1 {
-                            log::debug!(
-                                "[Block Alloc] Non-contiguous blocks: prev={}, current={}, diff={}",
-                                prev_block,
-                                block_num,
-                                block_num - prev_block
-                            );
                         }
                     }
                 }
@@ -726,11 +692,6 @@ impl Ext4 {
                 // Decrement remaining blocks to allocate
                 remaining -= found_blocks;
 
-                log::debug!(
-                    "[Block Alloc] Allocated {} blocks from bg {}",
-                    found_blocks,
-                    bgid
-                );
             }
 
             // Try next block group
@@ -740,20 +701,9 @@ impl Ext4 {
 
         // Log allocation results
         let allocated_count = result.len();
-        log::debug!(
-            "[Block Alloc] Allocated {}/{} blocks",
-            allocated_count,
-            count
-        );
 
         // Even if we couldn't allocate all requested blocks, return what we got
         if remaining > 0 {
-            log::warn!(
-                "[Block Alloc] Could only allocate {} out of {} blocks. Remaining: {}",
-                allocated_count,
-                count,
-                remaining
-            );
         }
 
         // Update start_bgid to continue from where we left off next time

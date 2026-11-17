@@ -1,5 +1,4 @@
 #![allow(unused)]
-#![feature(error_in_core)]
 
 extern crate alloc;
 
@@ -21,8 +20,6 @@ pub(crate) use core::ffi::CStr;
 pub(crate) use core::fmt::Debug;
 pub(crate) use core::mem::size_of;
 
-pub(crate) use bitflags::bitflags;
-pub(crate) use log::{debug, info, trace, warn};
 
 pub(crate) use crate::utils::errors::*;
 pub(crate) type Result<T> = core::result::Result<T, Ext4Error>;

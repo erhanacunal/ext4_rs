@@ -3,8 +3,7 @@ use crate::utils::*;
 
 use super::*;
 
-bitflags! {
-    #[derive(PartialEq, Eq)]
+crate::flags! {
     pub struct DirEntryType: u8 {
         const EXT4_DE_UNKNOWN = 0;
         const EXT4_DE_REG_FILE = 1;

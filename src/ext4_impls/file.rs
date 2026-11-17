@@ -167,7 +167,6 @@ impl Ext4 {
         // read buf is empty, return 0
         let mut read_buf_len = read_buf.len();
         if read_buf_len == 0 {
-            log::error!("[Read] Empty read buffer, returning 0");
             return Ok(0);
         }
 
@@ -184,8 +183,6 @@ impl Ext4 {
         // adjust the read buffer size if the read buffer size is greater than the file size
         if offset + read_buf_len > file_size as usize {
             read_buf_len = file_size as usize - offset;
-            log::trace!("[Read] Adjusted read size to {} bytes to not exceed file size (offset: {}, file_size: {})", 
-                read_buf_len, offset, file_size);
         }
 
         // calculate the start block and unaligned size
@@ -288,7 +285,6 @@ impl Ext4 {
         // write buf is empty, return 0
         let mut write_buf_len = write_buf.len();
         if write_buf_len == 0 {
-            log::info!("[Write] Empty write buffer, returning 0");
             return Ok(0);
         }
 
@@ -297,13 +293,6 @@ impl Ext4 {
 
         // Get the file size
         let file_size = inode_ref.inode.size();
-        log::trace!(
-            "[Write] Starting write - inode: {}, offset: {}, size: {}, current file size: {}",
-            inode,
-            offset,
-            write_buf_len,
-            file_size
-        );
 
         // Calculate the start and end block index
         let iblock_start = offset / BLOCK_SIZE;
@@ -317,7 +306,6 @@ impl Ext4 {
         // Calculate the unaligned size
         let unaligned = offset % BLOCK_SIZE;
         if unaligned > 0 {
-            log::trace!("[Alignment] Unaligned start: {} bytes", unaligned);
         }
 
         // Buffer to keep track of written bytes
@@ -336,7 +324,6 @@ impl Ext4 {
         };
 
         if blocks_to_allocate > 0 {
-            log::trace!("[Pre-allocation] Allocating {} blocks", blocks_to_allocate);
 
             // 使用append_inode_pblk_batch进行批量块分配
             let allocated_blocks =
@@ -344,11 +331,6 @@ impl Ext4 {
 
             // If we couldn't allocate all blocks, adjust the write size
             if allocated_blocks.len() < blocks_to_allocate {
-                log::trace!(
-                    "[Write] Could only allocate {} out of {} blocks",
-                    allocated_blocks.len(),
-                    blocks_to_allocate
-                );
 
                 // Calculate new write size based on allocated blocks
                 let max_write_size = allocated_blocks.len() * BLOCK_SIZE;
@@ -366,7 +348,6 @@ impl Ext4 {
                 };
 
                 if adjusted_write_size == 0 {
-                    log::error!("[Write] No space available for write after block allocation");
                     return return_errno_with_message!(
                         Errno::ENOSPC,
                         "No blocks available for write"
@@ -375,11 +356,6 @@ impl Ext4 {
 
                 // Update write size
                 write_buf_len = min(write_buf_len, adjusted_write_size);
-                log::trace!(
-                    "[Write] Adjusted write size from {} to {} bytes",
-                    write_buf.len(),
-                    write_buf_len
-                );
             }
 
             new_blocks += allocated_blocks.len();
@@ -394,11 +370,6 @@ impl Ext4 {
         };
 
         if available_blocks < required_blocks {
-            log::error!(
-                "[Write] Not enough blocks available: required {}, available {}",
-                required_blocks,
-                available_blocks
-            );
             return return_errno_with_message!(
                 Errno::ENOSPC,
                 "Not enough blocks available for write"
@@ -408,17 +379,11 @@ impl Ext4 {
         // Unaligned write
         if unaligned > 0 && written < write_buf_len {
             let len = min(write_buf_len, BLOCK_SIZE - unaligned);
-            log::trace!("[Unaligned Write] Writing {} bytes", len);
 
             // Get the physical block id
             let pblock_idx = match self.get_pblock_idx(&inode_ref, iblk_idx as u32) {
                 Ok(idx) => idx,
                 Err(e) => {
-                    log::error!(
-                        "[Write] Failed to get physical block for logical block {}: {:?}",
-                        iblk_idx,
-                        e
-                    );
                     return Err(e);
                 }
             };
@@ -440,10 +405,6 @@ impl Ext4 {
             block.sync_blk_to_disk(&self.block_device);
             let verify_block = Block::load(&self.block_device, pblock_idx as usize * BLOCK_SIZE);
             if verify_block.data[unaligned..unaligned + len] != write_buf[..len] {
-                log::error!(
-                    "[Write] Verification failed for unaligned write at block {}",
-                    pblock_idx
-                );
                 return return_errno_with_message!(Errno::EIO, "Write verification failed");
             }
             drop(block);
@@ -455,10 +416,6 @@ impl Ext4 {
 
         // Aligned write
         let mut aligned_blocks = 0;
-        log::info!(
-            "[Aligned Write] Starting aligned writes for {} blocks",
-            (write_buf_len - written + BLOCK_SIZE - 1) / BLOCK_SIZE
-        );
 
         while written < write_buf_len {
             aligned_blocks += 1;
@@ -467,11 +424,6 @@ impl Ext4 {
             let pblock_idx = match self.get_pblock_idx(&inode_ref, iblk_idx as u32) {
                 Ok(idx) => idx,
                 Err(e) => {
-                    log::error!(
-                        "[Write] Failed to get physical block for logical block {}: {:?}",
-                        iblk_idx,
-                        e
-                    );
                     return Err(e);
                 }
             };
@@ -493,10 +445,6 @@ impl Ext4 {
             block.sync_blk_to_disk(&self.block_device);
             let verify_block = Block::load(&self.block_device, block_offset);
             if verify_block.data[..write_size] != write_buf[written..written + write_size] {
-                log::error!(
-                    "[Write] Verification failed for aligned write at block {}",
-                    pblock_idx
-                );
                 return return_errno_with_message!(Errno::EIO, "Write verification failed");
             }
             drop(block);
@@ -506,29 +454,15 @@ impl Ext4 {
             iblk_idx += 1;
 
             if aligned_blocks % 1000 == 0 {
-                log::trace!(
-                    "[Progress] Written {} blocks, {} bytes",
-                    aligned_blocks,
-                    written
-                );
             }
         }
 
         // Update file size if necessary
         let new_size = offset + written;
         if new_size > file_size as usize {
-            log::trace!(
-                "[Write] Updating file size from {} to {}",
-                file_size,
-                new_size
-            );
 
             // Verify the new size is valid
             if new_size > EXT4_MAX_FILE_SIZE as usize {
-                log::error!(
-                    "[Write] New file size {} exceeds maximum allowed size",
-                    new_size
-                );
                 return return_errno_with_message!(Errno::EFBIG, "File size too large");
             }
 
@@ -538,11 +472,6 @@ impl Ext4 {
             // Verify file size update
             let verify_inode = self.get_inode_ref(inode);
             if verify_inode.inode.size() != new_size as u64 {
-                log::error!(
-                    "[Write] File size update verification failed: expected {}, got {}",
-                    new_size,
-                    verify_inode.inode.size()
-                );
                 return return_errno_with_message!(
                     Errno::EIO,
                     "File size update verification failed"
@@ -550,16 +479,6 @@ impl Ext4 {
             }
         }
 
-        log::info!("=== Write Performance Summary ===");
-        log::info!(
-            "[Blocks] Total blocks: {}, New blocks: {}, Aligned blocks: {}",
-            total_blocks,
-            new_blocks,
-            aligned_blocks
-        );
-        log::info!("[Bytes] Total written: {}", written);
-        log::info!("[File] Final size: {}", inode_ref.inode.size());
-        log::info!("=== End of Write Analysis ===");
 
         Ok(written)
     }

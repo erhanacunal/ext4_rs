@@ -46,8 +46,7 @@ pub struct Linux2 {
     pub l_i_reserved: u16,      // Reserved field
 }
 
-bitflags! {
-    #[derive(Debug, PartialEq, Eq, Clone, Copy)]
+crate::flags! {
     pub struct InodeFileType: u16 {
         const S_IFIFO = 0x1000;
         const S_IFCHR = 0x2000;
@@ -59,8 +58,7 @@ bitflags! {
     }
 }
 
-bitflags! {
-    #[derive(Debug, PartialEq, Eq, Clone, Copy)]
+crate::flags! {
     pub struct InodePerm: u16 {
         const S_IREAD = 0x0100;
         const S_IWRITE = 0x0080;

@@ -1,6 +1,7 @@
 pub mod bitmap;
 pub mod crc;
 pub mod errors;
+pub mod flags;
 pub mod path;
 
 pub use bitmap::*;

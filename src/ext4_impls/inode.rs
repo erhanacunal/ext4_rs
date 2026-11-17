@@ -1,4 +1,3 @@
-use bitflags::Flags;
 
 use crate::ext4_defs::*;
 use crate::prelude::*;
@@ -253,29 +252,16 @@ impl Ext4 {
         let allocated_blocks = self.balloc_alloc_block_batch(inode_ref, start_bgid, block_count)?;
 
         if allocated_blocks.is_empty() {
-            log::warn!("[Batch Append] No blocks could be allocated");
             return Ok(Vec::new());
         }
 
         // Record the actual number of allocated blocks
         let actual_allocated = allocated_blocks.len();
         if actual_allocated < block_count {
-            log::warn!(
-                "[Batch Append] Partial allocation: {}/{} blocks",
-                actual_allocated,
-                block_count
-            );
         }
 
         // Check the current state of the extent tree
         let root_header = inode_ref.inode.root_extent_header();
-        log::info!(
-            "[Batch Append] Current extent tree state: magic={:x}, entries={}, max={}, depth={}",
-            root_header.magic,
-            root_header.entries_count,
-            root_header.max_entries_count,
-            root_header.depth
-        );
 
         // Find the starting logical block position
         let mut current_iblk = iblock;
@@ -284,10 +270,6 @@ impl Ext4 {
             let last_extent = match self.get_last_extent(inode_ref) {
                 Ok(extent) => extent.first_block + extent.block_count as u32,
                 Err(_) => {
-                    log::warn!(
-                        "[Batch Append] Could not get last extent, starting at block {}",
-                        iblock
-                    );
                     iblock
                 }
             };
@@ -333,11 +315,6 @@ impl Ext4 {
             contiguous_segments.push(current_segment);
         }
 
-        log::info!(
-            "[Batch Append] Split {} allocated blocks into {} contiguous segments",
-            allocated_blocks.len(),
-            contiguous_segments.len()
-        );
 
         // Define maximum extent length
         const MAX_EXTENT_LENGTH: usize = EXT_INIT_MAX_LEN as usize;
@@ -362,16 +339,9 @@ impl Ext4 {
                 newex.store_pblock(first_physical_block);
                 newex.block_count = sub_segment_length as u16;
 
-                log::info!("[Batch Append] Inserting extent: first_block={}, block_count={}, physical_block={}", 
-                    current_iblk, sub_segment_length, first_physical_block);
 
                 // Validate extent validity
                 if !self.is_valid_extent(&newex, inode_ref) {
-                    log::error!(
-                        "[Batch Append] Invalid extent detected: first_block={}, block_count={}",
-                        newex.first_block,
-                        newex.block_count
-                    );
                     return return_errno_with_message!(Errno::EINVAL, "Invalid extent detected");
                 }
 
@@ -398,11 +368,6 @@ impl Ext4 {
 
             // Validate extent tree state
             let root_header = inode_ref.inode.root_extent_header();
-            log::info!("[Batch Append] Updated extent tree state: magic={:x}, entries={}, max={}, depth={}", 
-                root_header.magic,
-                root_header.entries_count,
-                root_header.max_entries_count,
-                root_header.depth);
         }
 
         // Update inode size, ensuring it doesn't overflow
@@ -463,40 +428,26 @@ impl Ext4 {
     fn is_valid_extent(&self, extent: &Ext4Extent, inode_ref: &Ext4InodeRef) -> bool {
         // Check if the extent is within valid range
         if extent.first_block >= EXT_MAX_BLOCKS {
-            log::error!(
-                "[Extent Validation] Extent first block {} exceeds maximum",
-                extent.first_block
-            );
             return false;
         }
 
         // Check if the extent length is valid
         if extent.block_count == 0 || extent.block_count > EXT_INIT_MAX_LEN {
-            log::error!(
-                "[Extent Validation] Invalid extent length {}",
-                extent.block_count
-            );
             return false;
         }
 
         // Check if the extent would cause overflow
         if let Some(end_block) = extent.first_block.checked_add(extent.block_count as u32) {
             if end_block > EXT_MAX_BLOCKS {
-                log::error!(
-                    "[Extent Validation] Extent end block {} exceeds maximum",
-                    end_block
-                );
                 return false;
             }
         } else {
-            log::error!("[Extent Validation] Extent block range overflow");
             return false;
         }
 
         // Check if the physical block is valid
         let pblock = extent.get_pblock();
         if pblock == 0 {
-            log::error!("[Extent Validation] Invalid physical block number");
             return false;
         }
 
