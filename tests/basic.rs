@@ -6,7 +6,7 @@ use ext4_rs::*;
 fn options(uuid: u8) -> FormatOptions {
     FormatOptions {
         uuid: [uuid, 2, 3, 4, 5, 6, 0x47, 8, 0x89, 10, 11, 12, 13, 14, 15, 16],
-        label: *b"ferrite-test\0\0\0\0",
+        label: *b"ext4rs-test\0\0\0\0\0",
         inodes_per_group: 512,
         journal_blocks: 1024,
     }

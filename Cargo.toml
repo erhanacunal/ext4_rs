@@ -2,7 +2,7 @@
 name = "ext4_rs"
 version = "2.0.0"
 edition = "2024"
-description = "no_std ext4 for ferrite-ui-xl (fork of yuoo655/ext4_rs)."
+description = "A small journaled ext4 for no_std firmware: format, mount, read and write, crash-safe (fork of yuoo655/ext4_rs)."
 authors = ["yuoo655 <lenuulan@gmail.com>"]
 license = "MIT"
 repository = "https://github.com/yuoo655/ext4_rs"
